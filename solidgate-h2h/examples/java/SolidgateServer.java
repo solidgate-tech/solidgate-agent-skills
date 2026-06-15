@@ -74,8 +74,15 @@ public class SolidgateServer {
         String signature = generateSignature(PUBLIC_KEY, SECRET_KEY, jsonBody);
         System.out.println("[DEBUG] POST " + path + " request: " + jsonBody);
 
+        if (!path.matches("/api/v[0-9]+/[a-z]+")) {
+            throw new IllegalArgumentException("Refusing request to unexpected path: " + path);
+        }
+        URI uri = URI.create(SOLIDGATE_API + path);
+        if (!"pay.solidgate.com".equals(uri.getHost())) {
+            throw new IllegalArgumentException("Refusing request to unexpected host: " + uri.getHost());
+        }
         HttpRequest req = HttpRequest.newBuilder()
-                .uri(URI.create(SOLIDGATE_API + path))
+                .uri(uri)
                 .header("merchant", PUBLIC_KEY)
                 .header("signature", signature)
                 .header("Content-Type", "application/json")

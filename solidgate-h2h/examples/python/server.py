@@ -204,4 +204,4 @@ if __name__ == "__main__":
         print("SOLIDGATE_PUBLIC_KEY and SOLIDGATE_SECRET_KEY must be set.")
         exit(1)
     print(f"Server running on http://localhost:{PORT}")
-    app.run(port=PORT, debug=True)
+    app.run(port=PORT)

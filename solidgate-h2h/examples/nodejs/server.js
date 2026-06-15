@@ -34,6 +34,7 @@ const SOLIDGATE_API = "https://pay.solidgate.com";
 const PORT = 3000;
 
 const app = express();
+app.disable("x-powered-by");
 app.use("/webhook", express.raw({ type: "*/*" }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -68,7 +69,7 @@ async function solidgateRequest(method, path, body) {
   const data = await resp.json();
 
   // [DEBUG] Remove in production
-  console.log(`[DEBUG] ${method} ${path} response (${resp.status}):`, JSON.stringify(data));
+  console.log("[DEBUG] response:", method, path, resp.status, JSON.stringify(data));
 
   if (!resp.ok) throw new Error(JSON.stringify(data));
   return data;
@@ -145,9 +146,20 @@ app.post("/charge", async (req, res) => {
 
     const data = await solidgateRequest("POST", "/api/v1/charge", body);
 
-    // Handle 3DS: verify_url is set when status is 3ds_verify
-    if (data.order?.status === "3ds_verify" && data.verify_url) {
-      return res.redirect(data.verify_url);
+    // Handle 3DS: verify_url is set when status is 3ds_verify.
+    // Only ever redirect to an https URL the PSP returned
+    // to avoid being turned into an open redirect.
+    if (data.order?.status === "3ds_verify" && typeof data.verify_url === "string") {
+      let verifyUrl;
+      try {
+        verifyUrl = new URL(data.verify_url);
+      } catch {
+        return res.status(502).json({ error: "Invalid verify_url from PSP" });
+      }
+      if (verifyUrl.protocol !== "https:") {
+        return res.status(502).json({ error: "Refusing non-https verify_url" });
+      }
+      return res.redirect(verifyUrl.toString());
     }
 
     res.json(data);
@@ -191,12 +203,13 @@ app.post("/refund", async (req, res) => {
 
 // Webhook
 app.post("/webhook", (req, res) => {
+  if (!Buffer.isBuffer(req.body)) return res.status(400).send("Invalid body");
   const rawBody = req.body.toString("utf-8");
   const signature = req.headers["signature"];
   const eventType = req.headers["solidgate-event-type"];
   const eventId = req.headers["solidgate-event-id"];
 
-  if (!signature) return res.status(400).send("Missing signature");
+  if (typeof signature !== "string") return res.status(400).send("Missing signature");
 
   if (!verifyWebhookSignature(rawBody, signature)) {
     console.error("Invalid webhook signature");
@@ -206,7 +219,7 @@ app.post("/webhook", (req, res) => {
   const event = JSON.parse(rawBody);
 
   // [DEBUG] Remove in production
-  console.log(`[DEBUG] Webhook [${eventType}] (${eventId}):`, JSON.stringify(event));
+  console.log("[DEBUG] webhook:", eventType, eventId, JSON.stringify(event));
 
   if (eventType === "card_gate.order.updated") {
     const status = event.order?.status;

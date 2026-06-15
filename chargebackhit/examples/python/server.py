@@ -115,4 +115,4 @@ if __name__ == "__main__":
         print("Set CHARGEBACKHIT_PUBLIC_KEY and CHARGEBACKHIT_SECRET_KEY.")
         exit(1)
     print(f"Server on http://localhost:{PORT}")
-    app.run(port=PORT, debug=True)
+    app.run(port=PORT)
