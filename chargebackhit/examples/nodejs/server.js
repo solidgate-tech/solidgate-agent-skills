@@ -23,6 +23,7 @@ const CBH_API = "https://api.chargebackhit.com";
 const PORT = 3000;
 
 const app = express();
+app.disable("x-powered-by");
 app.use("/webhook", express.raw({ type: "*/*" }));
 app.use(express.json());
 
@@ -38,7 +39,11 @@ function generateSignature(publicKey, secretKey, jsonBody) {
 
 function verifySignature(rawBody, receivedSignature) {
   const expected = generateSignature(PUBLIC_KEY, SECRET_KEY, rawBody);
-  return expected === receivedSignature;
+  if (expected.length !== receivedSignature.length) return false;
+  return crypto.timingSafeEqual(
+    Buffer.from(expected),
+    Buffer.from(receivedSignature)
+  );
 }
 
 async function cbhRequest(path, body) {
@@ -58,7 +63,7 @@ async function cbhRequest(path, body) {
   });
 
   const data = await resp.json();
-  console.log(`[DEBUG] Response (${resp.status}):`, JSON.stringify(data).substring(0, 200));
+  console.log("[DEBUG] Response:", resp.status, JSON.stringify(data).substring(0, 200));
   return data;
 }
 
@@ -85,10 +90,11 @@ app.get("/", (req, res) => {
 
 // Handle alert webhooks from ChargebackHit
 app.post("/webhook", (req, res) => {
+  if (!Buffer.isBuffer(req.body)) return res.status(400).send("Invalid body");
   const rawBody = req.body.toString("utf-8");
   const signature = req.headers["signature"];
 
-  if (!signature || !verifySignature(rawBody, signature)) {
+  if (typeof signature !== "string" || !verifySignature(rawBody, signature)) {
     console.error("Invalid webhook signature");
     return res.status(400).send("Invalid signature");
   }

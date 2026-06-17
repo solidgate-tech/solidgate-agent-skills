@@ -50,6 +50,7 @@ if (!PUBLIC_KEY || !SECRET_KEY) {
 const api = new solidGate.Api(PUBLIC_KEY, SECRET_KEY);
 
 const app = express();
+app.disable("x-powered-by");
 // Webhook needs the raw body for HMAC verification — register before json().
 app.use("/webhook", express.raw({ type: "*/*" }));
 app.use(express.json());
@@ -113,12 +114,13 @@ app.post("/api/payment-intent", (req, res) => {
 
 // Webhook endpoint — verify, then handle.
 app.post("/webhook", (req, res) => {
+  if (!Buffer.isBuffer(req.body)) return res.status(400).send("Invalid body");
   const rawBody = req.body.toString("utf-8");
   const signature = req.headers["signature"];
   const eventType = req.headers["solidgate-event-type"];
   const eventId = req.headers["solidgate-event-id"];
 
-  if (!signature) return res.status(400).send("Missing signature header");
+  if (typeof signature !== "string") return res.status(400).send("Missing signature header");
   if (!verifyWebhookSignature(rawBody, signature)) {
     console.error("Invalid webhook signature");
     return res.status(400).send("Invalid signature");
