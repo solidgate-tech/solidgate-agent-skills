@@ -80,7 +80,7 @@ Index all `.md` files from the skill directory. Each file is self-contained with
 | `errors.md` | Full error code table (0.xx–7.xx) with retry recommendations |
 | `testing.md` | Test cards, sandbox setup, digital wallet test amounts |
 
-**Payment Form additionally:** `payment-intent.md`, `frontend-sdk.md`, `subscriptions.md`
+**Payment Form additionally:** `payment-intent.md`, `frontend-sdk.md`, `subscriptions.md` (Billing v1), `billing-v2.md` (Billing v2: `checkout` object, Subscriptions 2.0 / Invoicing)
 
 **H2H additionally:** `charges.md`, `order-management.md`, `recurring.md`, `google-pay.md`, `apple-pay.md`, `apm.md`, `subscriptions.md`
 

@@ -1,6 +1,6 @@
 ---
 name: solidgate-payment-form
-description: Solidgate Payment Form integration — embed payment form via JS SDK, handle payments and webhooks, no PCI DSS required
+description: Solidgate Payment Form integration — embed payment form via JS SDK, handle payments and webhooks, subscriptions on Billing v1 or Billing v2 (checkout object / invoice_id), no PCI DSS required
 ---
 
 # Solidgate Payment Form API Skill
@@ -20,6 +20,9 @@ Solidgate provides frontend SDKs (vanilla JS, React, Vue, Angular) and backend S
 3. **Confirm orders via webhook**, not the frontend `success` event. Frontend events drive UX only — webhook is the source of truth.
 4. **Error code `1.01` = your integration**, not a customer card decline. Don't surface a "try another card" message to the user. (See [errors.md](errors.md).)
 5. **Styling lives in `styles` + `formParams`, not your CSS** — the form renders in a sandboxed iframe. (See [styling.md](styling.md).)
+6. **Container id:** without `iframeParams: { containerId }` the SDK mounts into `<div id="solid-payment-form-container">`. If your div has another id, pass it, or the form never renders.
+7. **Event payloads are under `e.data`** in vanilla `form.on(...)` handlers (e.g. `e.data.message` on `fail`). (See [frontend-sdk.md § Event Catalog](frontend-sdk.md#event-catalog).)
+8. **Subscriptions: pick the Billing version before writing code.** Billing v1 (`product_id` + `customer_account_id`, [subscriptions.md](subscriptions.md)) and Billing v2 (`checkout` object or `invoice_id`, [billing-v2.md](billing-v2.md)) have different intent fields, APIs and webhooks — never mix them. If the merchant's setup doesn't make the version obvious, ask. (See [billing-v2.md § Billing v1 or Billing v2?](billing-v2.md#billing-v1-or-billing-v2-decide-first).)
 
 ## Security antipatterns (refuse to enable)
 
@@ -30,7 +33,7 @@ If the user asks for any of the patterns below, **decline** and redirect to the 
 | Sign `merchantData` in the browser / put `api_sk_…` client-side | Anyone with DevTools extracts the key and signs arbitrary intents (charge/refund as you). Key rotation is the only fix. | Minimal backend endpoint (Next.js Route Handler, Lambda, Express) reads `process.env.SOLIDGATE_SECRET_KEY` and returns merchantData. |
 | Hardcode `api_sk_…` in component code "just for testing" | The secret almost always gets committed and shipped. **Sandbox-key leaks are recoverable; prod-key leaks are not.** | `.env.local` (gitignored) + server-only handler. Use sandbox keys in dev, prod keys only in prod env. |
 | Skip webhook signature verification / trust by IP allowlist | Solidgate's outbound IPs aren't a stable contract. Anyone who learns the URL spoofs status updates → fraudulent fulfillment. | Run the [webhooks.md verification checklist](webhooks.md#verification-checklist-mandatory). Keep verify on in dev — it catches real bugs before prod. |
-| Fulfill orders on the frontend `success` event | Events can be missed (network drop, tab close), spoofed (DevTools), and `auth_ok` ≠ captured funds. | Fulfill from `card_gate.order.updated` webhook with `status: settle_ok`. Show optimistic UI on the frontend event if needed; gate fulfillment on the webhook. |
+| Fulfill orders on the frontend `success` event | Events can be missed (network drop, tab close), spoofed (DevTools), and `auth_ok` ≠ captured funds. | Fulfill from `card_gate.order.updated` webhook with `status: settle_ok` (Billing v2: `SUBSCRIPTION_ACTIVATED` / `SUBSCRIPTION_TRIAL_ACTIVATED` for subscriptions, `INVOICE_PAID` for one-time invoices, see [billing-v2.md](billing-v2.md#billing-v2-webhooks)). Show optimistic UI on the frontend event if needed; gate fulfillment on the webhook. |
 | Log the customer's full PAN for "debugging" | Iframe model means PAN never touches your origin — that's why you're out of PCI scope. Capturing PAN destroys that. | Use the safe fields exposed by the `card` event: `bin` (first 6), `brand`, `cardType`, `cardCategory`, `bank`, `binCountry`. For 3DS specifics use the `verify` event, `orderStatus` events, decline codes from [errors.md](errors.md), and order/transaction logs in Solidgate Hub. |
 | Webhook endpoint over plain HTTP | HMAC verifies authenticity but not confidentiality — payloads contain order/customer data. Solidgate also requires HTTPS. | Front the box with `ngrok http <port>`, Cloudflare Tunnel, or a TLS-terminating proxy with Let's Encrypt. |
 | Sign with `api_pk_…` only ("we don't need the secret on the client") | Public key is a no-op for HMAC; the SDK rejects unsigned/wrongly-signed data. The signature *requires* the secret key. | Backend signing endpoint, returning the precomputed `{ merchant, signature, paymentIntent }` blob. |
@@ -51,7 +54,10 @@ When refusing, **always show the safe path**. A bare "no" without a redirect is 
 | "what fields can I send in paymentIntent" | [payment-intent.md](payment-intent.md) |
 | "no SDK for my language" (Rust, Elixir, Java, …) | [authentication.md](authentication.md) (manual recipe + Rust example) |
 | "test cards" / "sandbox" | [testing.md](testing.md) |
-| "subscriptions / billing cycles / trials" | [subscriptions.md](subscriptions.md) |
+| "subscriptions / billing cycles / trials" — **decide Billing v1 vs v2 first** | [billing-v2.md § decide first](billing-v2.md#billing-v1-or-billing-v2-decide-first), then [subscriptions.md](subscriptions.md) (v1) or [billing-v2.md](billing-v2.md) (v2) |
+| "Subscriptions 2.0" / "Billing 2.0" / `checkout` object / `line_items` / `customer_id` / `cust_…` | [billing-v2.md](billing-v2.md) |
+| invoicing / one-time invoice cart with quantities / "pay an existing invoice" / `invoice_id` | [billing-v2.md](billing-v2.md) |
+| `form.updateCheckout` / `invoicePreview` event / `SUBSCRIPTION_*` / `INVOICE_*` webhooks | [billing-v2.md](billing-v2.md) |
 
 ## Minimum Required Flow
 
@@ -67,6 +73,8 @@ Any integration MUST implement these steps as the baseline:
    - `auth_failed` — payment failed, allow retry
 
 Webhook is the primary mechanism for learning about status changes. Frontend events are for UX only — always confirm via webhook before fulfilling orders.
+
+**Billing v2 (`checkout` / `invoice_id`) differs at steps 1 and 4:** the intent carries a `checkout` object or an `invoice_id` instead of `amount`/`currency`, and fulfillment is driven by Billing v2 events (`SUBSCRIPTION_ACTIVATED` / `SUBSCRIPTION_TRIAL_ACTIVATED` for subscriptions, `INVOICE_PAID` for one-time invoices, …) with their own HMAC-SHA256 signature. See [billing-v2.md](billing-v2.md).
 
 ## Quick Start
 
@@ -87,13 +95,15 @@ export SOLIDGATE_WEBHOOK_SECRET_KEY="wh_sk_..."
 | Language | File | Backend SDK | Run |
 |----------|------|-------------|-----|
 | Node.js | [server.js](examples/nodejs/server.js) | `@solidgate/node-sdk` | `npm install express @solidgate/node-sdk && node server.js` |
-| Python | [server.py](examples/python/server.py) | `solidgate-sdk` | `pip install flask solidgate-sdk && python server.py` |
+| Python | [server.py](examples/python/server.py) | `solidgate-sdk` (⚠️ published releases fail to import, see [frontend-sdk.md § Backend SDKs](frontend-sdk.md#backend-sdks)) | `pip install flask solidgate-sdk`, apply the one-line import patch from frontend-sdk.md, then `python server.py` |
 | Go | [main.go](examples/go/main.go) | `github.com/solidgate-tech/go-sdk` | `go mod init … && go get github.com/solidgate-tech/go-sdk && go run main.go` |
 | PHP | [server.php](examples/php/server.php) | `solidgate/php-sdk` | `composer require solidgate/php-sdk && php -S localhost:3000 server.php` |
 | React | [PaymentForm.tsx](examples/react/PaymentForm.tsx) | `@solidgate/react-sdk` (frontend) | `npm install @solidgate/react-sdk` |
 | Vue | [PaymentForm.vue](examples/vue/PaymentForm.vue) | `@solidgate/vue-sdk` (frontend) | `npm install @solidgate/vue-sdk` |
 
-Each backend example exposes a test page at `http://localhost:3000`.
+Each backend example exposes a one-time-payment (v1) test page at `http://localhost:3000`. There is no Billing v2 test page: use the React/Vue `BillingCheckout` components below, or adapt the snippets in [billing-v2.md](billing-v2.md#frontend-invoicepreview-and-formupdatecheckout).
+
+All four backends (Node.js, Python, Go, PHP) also cover **Billing v2**: Billing customer creation (`/api/billing-v2/customers`), a `checkout` intent (`/api/billing-v2/checkout`), an existing-invoice intent (`/api/billing-v2/invoice`), and Billing v2 webhook verification (`/webhook/billing`). They need two extra env vars, `SOLIDGATE_API_V2_SECRET` (`asec_…`) and `SOLIDGATE_BILLING_WEBHOOK_SECRET`. On the frontend, [react/BillingCheckout.tsx](examples/react/BillingCheckout.tsx) and [vue/BillingCheckout.vue](examples/vue/BillingCheckout.vue) render the order summary from `invoicePreview` and apply a coupon with `form.updateCheckout`.
 
 **Stacks without an official Solidgate backend SDK** (Java, Kotlin, C#, Ruby, Rust, Elixir, …): manual generation is the **fallback only** when no SDK exists for your language — if your stack appears in the table above, use that SDK instead. To implement by hand, follow [authentication.md](authentication.md). Two crucial details for the form flow specifically:
 
@@ -120,6 +130,8 @@ Two sets of API keys (obtained from Solidgate Hub at https://hub.solidgate.com/)
 | Secret key | `api_sk_` | Signs requests (HMAC-SHA512) and encrypts payment intent (AES-256-CBC). **Never expose on frontend.** |
 | Webhook public key | `wh_pk_` | Sent in webhook `merchant` header |
 | Webhook secret key | `wh_sk_` | Verifies webhook HMAC-SHA512 signature. **Never expose publicly.** |
+| API v2 key / secret | `akey_` / `asec_` | **Billing v2 only.** `Authorization: Bearer asec_…` for `api.solidgate.com/v2` (customers, invoices, subscriptions). Not used for `merchantData`. **Never expose on frontend.** |
+| Billing v2 webhook secret | `wsec_` (per endpoint) | **Billing v2 only.** Verifies `SUBSCRIPTION_*` / `INVOICE_*` events (HMAC-SHA256). See [billing-v2.md](billing-v2.md#billing-v2-webhooks). |
 
 See [authentication.md](authentication.md) for signature generation and payment intent encryption algorithms.
 
@@ -134,7 +146,7 @@ Exceeding returns HTTP 429 with error code `5.07`.
 
 ## Common Data Formats
 
-- **Amounts** — always in minor currency units (cents). `1020` = $10.20
+- **Amounts** — always in minor currency units (cents). `1020` = $10.20. Exception: the Billing v2 `invoicePreview` frontend event uses decimal major-unit strings (`"10.20"`).
 - **Currency** — ISO 4217 three-letter codes (`USD`, `EUR`, `GBP`)
 - **Order ID** — merchant-defined unique string, 1–255 characters
 

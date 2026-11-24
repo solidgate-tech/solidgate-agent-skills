@@ -145,10 +145,12 @@ Write the complete webhook handler with:
 
 ---
 
-### I Want Subscriptions (Recurring Payments)
+### I Want Subscriptions (Recurring Payments) — Billing v1
+
+> Use this prompt if your account runs **Billing v1 (Subscriptions 1.0)**: products from Hub referenced by `product_id`, your own `customer_account_id`. On **Billing v2 (Subscriptions 2.0)** use the next prompt instead. Not sure? Ask your Solidgate manager which Billing version is enabled.
 
 ```
-I want to set up recurring subscription payments via Solidgate.
+I want to set up recurring subscription payments via Solidgate (Billing v1 / Subscriptions 1.0).
 
 TASK:
 Build a subscription payment flow using the Payment Form.
@@ -192,6 +194,57 @@ Write the complete code for:
 1. Subscription initialization via Payment Form
 2. Webhook handler for subscription.updated.v2
 3. API calls to cancel/pause/resume subscription
+```
+
+### I Want Subscriptions or Invoices — Billing v2 (Subscriptions 2.0)
+
+```
+I want to sell subscriptions via Solidgate Billing v2 (Subscriptions 2.0) using the Payment Form.
+Follow solidgate-payment-form/billing-v2.md. Do NOT use Billing v1 fields
+(product_id, customer_account_id, top-level product_price_id/coupon_id) or subscriptions.solidgate.com.
+
+WHAT SHOULD HAPPEN:
+1. I already have a product with a recurring price (price UUID below)
+2. When a user signs up, my backend creates a Billing customer once:
+   POST https://api.solidgate.com/v2/customers/create  (Authorization: Bearer <API v2 secret>)
+   and stores the returned id (cust_...) on the user
+3. User clicks "Subscribe" → backend builds a payment intent with a `checkout` object
+   (mode "subscription", customer_id, unique merchant_reference, one line item with my price)
+   and signs it with the Solidgate SDK (API v1 keys) → frontend renders the Payment Form
+4. The form shows the price from the `invoicePreview` event; a coupon field calls form.updateCheckout
+5. User pays → Solidgate creates the subscription and charges every billing period
+6. My server receives Billing v2 webhooks and grants/revokes access
+
+PAYMENT INTENT (no amount / currency — Billing calculates the total):
+{
+  "order_id": "ord-123",
+  "order_description": "Pro plan",
+  "checkout": {
+    "mode": "subscription",
+    "customer_id": "cust_...",
+    "merchant_reference": "sub-user42-001",
+    "line_items": [{ "product_price_id": "<price UUID>", "quantity": 1 }]
+  }
+}
+
+WEBHOOKS (separate endpoint, Billing v2 scheme):
+- Verify header "signature" = base64(HMAC-SHA256(endpoint_secret, raw_body))
+- Envelope: { event_id, event_type, occurred_at, data }; dedupe on event_id
+- Grant: SUBSCRIPTION_ACTIVATED / SUBSCRIPTION_TRIAL_ACTIVATED (match data.subscription.merchant_reference); extend: SUBSCRIPTION_RENEWED
+- Revoke: SUBSCRIPTION_UNPAID / INVOICE_UNPAID / SUBSCRIPTION_CANCELLED / SUBSCRIPTION_EXPIRED
+
+MY KEYS:
+- Public key: [paste api_pk_...]          (signs the payment form)
+- Secret key: [paste api_sk_...]
+- API v2 secret: [paste asec_...]          (Billing customers / invoices API)
+- Billing webhook secret: [paste from the webhook endpoint]
+- Product Price ID: [paste price UUID]
+
+Write the complete code for:
+1. Customer creation + storing customer_id
+2. Checkout intent endpoint + Payment Form with invoicePreview-driven price summary
+3. Billing v2 webhook handler with signature check and idempotency
+4. (Optional) paying an invoice we already issued via API v2 by passing `invoice_id` instead of `checkout`
 ```
 
 ---

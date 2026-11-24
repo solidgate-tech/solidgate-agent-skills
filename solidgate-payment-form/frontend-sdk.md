@@ -40,7 +40,7 @@ npm install @solidgate/angular-sdk
 composer require solidgate/php-sdk           # PHP
 npm install @solidgate/node-sdk              # Node.js
 go get github.com/solidgate-tech/go-sdk      # Go
-pip3 install solidgate-sdk                   # Python
+pip3 install solidgate-sdk                   # Python — see the known import issue below
 ```
 
 ### SDK Usage
@@ -69,14 +69,25 @@ dto, _ := api.FormMerchantData(intentBytes)
 ```
 
 **Python** — `solidgate-sdk`:
+
+> ⚠️ **Known issue (checked 2026-11-18):** every published `solidgate-sdk` release on PyPI (0.2.1–0.4.0) fails on `import solidgate` with `ImportError: cannot import name 'MerchantData'`. The package's `__init__.py` imports a class that no longer exists. Until a fixed release ships, pick one:
+> - Delete the line `from .api_client import MerchantData` from the installed `solidgate/__init__.py`. With that line removed, `form_merchant_data` works. A one-liner (`find_spec` locates the package without running its `__init__`):
+>   ```bash
+>   sed -i.bak '/import MerchantData/d' "$(python -c 'import importlib.util,os;print(os.path.join(os.path.dirname(importlib.util.find_spec("solidgate").origin),"__init__.py"))')"
+>   ```
+> - Or implement `merchantData` generation by hand with the recipe in [authentication.md](authentication.md).
+>
+> Tell the user which workaround you applied.
+
 ```python
 from solidgate import ApiClient
 
-# Constructor accepts public_key / secret_key — positional or keyword.
-client = ApiClient(public_key=public_key, secret_key=secret_key)
+# Constructor is ApiClient(merchant_id, private_key): public key, then secret key.
+# There are no `public_key=` / `secret_key=` keyword arguments.
+client = ApiClient(public_key, secret_key)
 
 md = client.form_merchant_data(payment_intent)
-# `md` is a `solidgate.MerchantData` with snake_case attrs and NO `.to_dict()`.
+# `md` is a `FormInitDTO` with snake_case attrs and NO `.to_dict()`.
 # The frontend expects camelCase `paymentIntent` — convert manually:
 merchant_data = {
     "merchant": md.merchant,
@@ -121,7 +132,7 @@ For stacks **without an official SDK** (Java, C#, Ruby, Rust, Elixir, …) — a
   form.on("mounted", () => { /* ready */ });
   form.on("success", (e) => { /* show success UX */ });
   form.on("fail",    (e) => { /* show decline UX — confirm via webhook */ });
-  form.on("error",   (e) => { /* init error — log e.value, e.details */ });
+  form.on("error",   (e) => { /* init error — log e.data.value, e.data.details */ });
 </script>
 ```
 
@@ -279,16 +290,18 @@ The corresponding style target for these fields is `additional_field` (see [styl
 
 **Vanilla JS:**
 ```javascript
-form.on("event_name", (e) => { /* e.data */ });
+form.on("event_name", (e) => { const payload = e.data; /* the payloads below are e.data, e.g. e.data.message */ });
 form.unsubscribe("event_name");
 form.unsubscribeAll();
 ```
 
-**React props:** `onMounted`, `onSubmit`, `onCard`, `onInteraction`, `onRedirect`, `onCustomStylesAppended`, `onSuccess`, `onVerify`, `onFail`, `onOrderStatus`, `onPaymentDetails`, `onResize`, `onError`
+**React props:** `onMounted`, `onSubmit`, `onCard`, `onInteraction`, `onRedirect`, `onCustomStylesAppended`, `onSuccess`, `onVerify`, `onFail`, `onOrderStatus`, `onPaymentDetails`, `onResize`, `onError`, `onReadyPaymentInstance` (gives you the form instance for `form.on(...)`, `form.update`, `form.updateCheckout`), `onInvoicePreview` (Billing v2)
 
-**Vue events:** `@mounted`, `@submit`, `@card`, `@interaction`, `@redirect`, `@custom-styles-appended`, `@success`, `@verify`, `@fail`, `@order-status`, `@payment-details`, `@resize`, `@error`
+**Vue events:** `@mounted`, `@submit`, `@card`, `@interaction`, `@redirect`, `@custom-styles-appended`, `@success`, `@verify`, `@fail`, `@order-status`, `@payment-details`, `@resize`, `@error`, `@ready-payment-instance` (gives you the form instance), `@invoice-preview` (Billing v2)
 
 ### Event Catalog
+
+> The payloads below are what you find in **`e.data`** in vanilla JS (`form.on("paymentDetails", (e) => e.data.payment.priceBreakdown)`, `form.on("fail", (e) => e.data.message)`). The React/Vue callbacks may hand you either shape, so read `(e.data ?? e)` there.
 
 #### `mounted`
 Fires when form or button renders and becomes interactive.
@@ -450,6 +463,28 @@ Fires when form dimensions change.
 { type: "resize", width: number, height: number }
 ```
 
+#### `invoicePreview` (Billing v2)
+Fires only for intents with a `checkout` object: at init (before `mounted`), and again after a billing-address change when the recalculated invoice differs. Identical previews are not re-sent. Amounts are decimal strings in major units. Not fired by `form.updateCheckout()`, which returns the preview instead. Subscribe with React `onInvoicePreview={(event) => event.invoicePreview}`, Vue `@invoice-preview`, Angular `(invoicePreview)`, or vanilla `form.on("invoicePreview", (e) => e.data.invoicePreview)` **in the same synchronous block as `init`**, or you miss the first preview. See [billing-v2.md](billing-v2.md#invoicepreview-event).
+```typescript
+{
+  type: "invoicePreview",
+  invoicePreview: {
+    total: string,          // "40.00"
+    amountDue?: string,     // newer SDK releases, not in the public reference yet; use `amountDue ?? total`
+    currency: string,
+    currencyIcon: string,
+    amounts?: { subtotal: string, discount: string, taxable?: string, tax?: string, balanceApplied?: string, balanceCredited?: string }  // balance fields: newer SDK releases, may be absent,
+    lineItems: Array<{
+      productPriceId: string, productId: string, quantity: number,
+      amount: string, currency: string, currencyIcon: string,
+      amounts?: { subtotal: string, discount: string, unitPrice?: string, taxable?: string, tax?: string },
+      tax?: { categoryId: string, mode: string, rate: number }
+    }>,
+    customer?: { address: { country: string } }   // newer SDK releases, may be absent
+  }
+}
+```
+
 ### Event Timeline
 
 1. `mounted` → `customStylesAppended` (if custom CSS)
@@ -491,15 +526,30 @@ const [form, setForm] = useState(null);
 
 ### `form.update(partialIntent)`
 
-Update payment parameters without reinitializing. Accepts `amount`, `currency`, `product_id`, and other select fields.
+Update payment parameters without reinitializing. Accepts `amount`, `currency`, `product_id`, and other select fields. **Not for Billing v2 checkout intents** — use [`form.updateCheckout`](#formupdatecheckoutconfig-billing-v2) there.
 
 ```javascript
 form.update(updatedMerchantData);
 ```
 
+### `form.updateCheckout(config)` (Billing v2)
+
+Change the Billing v2 cart (`lineItems`, one discount via `couponId`/`couponCode`, `subscriptionData.trial` / `metadata` / `description`) on an intent that carries a `checkout` object. Returns `Promise<{ invoicePreview }>` and rejects with `UpdateCheckoutError` (`details.code`, `details.message`). Checkout intents also emit the **`invoicePreview`** event at init and after a billing-address change. Full contract: [billing-v2.md § Frontend](billing-v2.md#frontend-invoicepreview-and-formupdatecheckout).
+
+- `update()` and `updateCheckout()` are queued and run one at a time. They also wait while an Apple Pay / Google Pay sheet or APM modal is open. Wallet buttons are non-interactive until the call settles.
+- After a rejected `updateCheckout`, `form.update()` is refused until an `updateCheckout` succeeds. Not available in resign mode.
+- TypeScript: if your installed SDK typings don't list `updateCheckout` yet, declare a local interface for the form instance (see [react/BillingCheckout.tsx](examples/react/BillingCheckout.tsx)).
+
+```javascript
+const { invoicePreview } = await form.updateCheckout({
+  lineItems: [{ productPriceId: "3f8b2a8e-6c1d-4f7e-9a51-2b0d6f1c9e44", quantity: 1 }],
+  discounts: [{ couponCode: "SPRING25" }],
+});
+```
+
 ### `form.applyCoupon(couponCode)`
 
-Apply a discount coupon (subscriptions only):
+Apply a discount coupon (Billing v1 subscriptions only — for Billing v2 pass `discounts` to `form.updateCheckout`):
 
 ```javascript
 form.applyCoupon("SPRING20")
@@ -553,6 +603,8 @@ const form = await PaymentFormSdk.resign({
 ```
 
 ### resignIntent Fields
+
+> Billing v2 (`checkout` / `invoice_id`) is **not covered** for resign in this skill. Don't put either field in a `resignIntent`, and `form.updateCheckout` is unavailable in resign mode.
 
 The resignIntent accepts essentially the same shape as `paymentIntent` ([payment-intent.md](payment-intent.md)) **plus** the required `recurring_token`, **minus** `product_id` and any wallet-token paths.
 
