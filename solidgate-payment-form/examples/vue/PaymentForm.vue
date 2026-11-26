@@ -136,12 +136,12 @@ function handleSuccess(event: any) {
 }
 
 function handleFail(event: any) {
-  error.value = event.error?.message || "Payment declined";
+  error.value = (event.data ?? event).message || "Payment declined"; // fail: { code, message }
   emit("paymentFail", event);
 }
 
 function handleError(event: any) {
-  error.value = event.value?.message || "An error occurred";
+  error.value = (event.data ?? event).value?.message || "An error occurred";
 }
 
 function handleMounted() {

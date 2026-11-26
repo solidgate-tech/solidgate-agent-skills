@@ -13,9 +13,9 @@ The payment intent is a JSON object describing the payment parameters. It is enc
 | `order_id` | string | 255 | Unique order identifier per merchant | `"order-12345"` |
 | `order_description` | string | 255 | Human-readable transaction description | `"Premium subscription"` |
 
-## Required Fields (Subscriptions)
+## Required Fields (Subscriptions, Billing v1)
 
-For subscriptions, `amount` and `currency` are derived from the product price — do NOT include them.
+For Billing v1 subscriptions, `amount` and `currency` are derived from the product price — do NOT include them. For **Billing v2** see [§ Billing v2 fields](#billing-v2-fields-checkout--invoice_id) below.
 
 | Field | Type | Format | Description | Example |
 |-------|------|--------|-------------|---------|
@@ -71,7 +71,31 @@ Nested object `billing_address`:
 | `billing_address.city` | string | 100 | City | `"San Francisco"` |
 | `billing_address.zip_code` | string | 10 | Postal code | `"94105"` |
 
-## Subscription / Recurring Fields
+## Billing v2 Fields (`checkout` / `invoice_id`)
+
+Billing v2 (Subscriptions 2.0 / Invoicing) replaces the v1 product fields with **one** of `checkout` or `invoice_id`, never both. With either, **omit top-level `amount`, `currency` and `product_id`**. Do not send `customer_account_id`, and don't repeat customer fields already stored on the Billing customer. Billing calculates the total.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `checkout` | object | `mode` (`subscription` \| `invoice`), `customer_id` (Billing customer `cust_…`), `merchant_reference`, `line_items[]` (`product_price_id`, `quantity`, `description?` invoice mode only), `discounts[]` (one: `coupon_id` \| `coupon_code`), `subscription_data?` (`trial`, `metadata`, `description`, subscription mode only). Full rules: [billing-v2.md § `checkout` object reference](billing-v2.md#checkout-object-reference). |
+| `invoice_id` | string | Pay an invoice you already issued and finalized via API v2 (status `OPEN`, `DUNNING` or `UNPAID`). Amount, customer, email and address come from the invoice. See [billing-v2.md § Flow C](billing-v2.md#flow-c-pay-an-invoice-you-already-issued-invoice_id). |
+
+
+
+```json
+{
+  "order_id": "ord-2026-000123",
+  "order_description": "Pro plan (monthly)",
+  "checkout": {
+    "mode": "subscription",
+    "customer_id": "cust_01KMG2ABYPF6XS5DMJQ817C429",
+    "merchant_reference": "sub-user42-20261118-01",
+    "line_items": [{ "product_price_id": "3f8b2a8e-6c1d-4f7e-9a51-2b0d6f1c9e44", "quantity": 1 }]
+  }
+}
+```
+
+## Subscription / Recurring Fields (Billing v1)
 
 Subscription / Pix-Automático recurring details are split across two top-level objects:
 
@@ -209,7 +233,9 @@ Acquirer-side classification data. Currently only `car_rental` is surfaced.
 }
 ```
 
-## Subscription Example
+## Subscription Example (Billing v1)
+
+For a Billing v2 subscription example see [§ Billing v2 fields](#billing-v2-fields-checkout--invoice_id) or [billing-v2.md](billing-v2.md).
 
 ```json
 {
@@ -248,5 +274,5 @@ See [frontend-sdk.md](frontend-sdk.md) for button params per APM.
 
 - `order_id` must be unique across all your orders. Duplicate `order_id` returns error `5.06`.
 - Amounts are always in **cents** (minor units). $10.20 → `1020`, €5.00 → `500`.
-- For subscriptions, `amount` and `currency` come from the product price — omit them.
+- For subscriptions, `amount` and `currency` come from the product price (Billing v1) or from Billing's computed invoice (Billing v2 `checkout` / `invoice_id`) — omit them.
 - The payment intent JSON is encrypted before being sent to the frontend — the customer never sees the raw data.

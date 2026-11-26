@@ -125,14 +125,14 @@ export default function PaymentForm({
 
   const handleFail = useCallback(
     (event: any) => {
-      setError(event.error?.message || "Payment declined");
+      setError((event.data ?? event).message || "Payment declined"); // fail: { code, message }
       onPaymentFail?.(event);
     },
     [onPaymentFail],
   );
 
   const handleError = useCallback((event: any) => {
-    setError(event.value?.message || "An error occurred");
+    setError((event.data ?? event).value?.message || "An error occurred");
   }, []);
 
   const handleMounted = useCallback(() => {

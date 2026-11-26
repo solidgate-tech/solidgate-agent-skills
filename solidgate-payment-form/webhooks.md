@@ -41,7 +41,9 @@ Solidgate sends HTTP POST requests to your `webhook_url` when order or subscript
 
 | Event | Description |
 |-------|-------------|
-| `subscription.updated.v2` | Subscription status or billing changed |
+| `subscription.updated.v2` | **Billing v1** subscription status or billing changed (the `.v2` suffix is the schema version, not Billing v2) |
+
+> **Billing v2** (Subscriptions 2.0 / Invoicing) events — `SUBSCRIPTION_ACTIVATED`, `INVOICE_PAID`, … — are delivered to a separate endpoint with a different envelope and a **different signature** (HMAC-SHA256 over the raw body with the per-endpoint secret, Base64). The checklist below is for the v1 scheme only. See [billing-v2.md § Billing v2 webhooks](billing-v2.md#billing-v2-webhooks).
 
 ### Tax
 

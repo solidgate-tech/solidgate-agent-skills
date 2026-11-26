@@ -145,14 +145,14 @@
             });
 
             form.on("fail", (event) => {
-              const msg = event.error?.message || "Payment declined";
+              const msg = (event.data ?? event).message || "Payment declined"; // fail: { code, message }
               showStatus("Payment failed: " + msg, "error");
               console.log("Fail event:", event);
             });
 
             form.on("error", (event) => {
               showStatus(
-                "Error: " + (event.value?.message || "Unknown error"),
+                "Error: " + ((event.data ?? event).value?.message || "Unknown error"),
                 "error",
               );
               console.error("Error event:", event);
@@ -163,7 +163,7 @@
             });
 
             form.on("card", (event) => {
-              console.log("Card detected:", event.card);
+              console.log("Card detected:", (event.data ?? event).card);
             });
           } catch (err) {
             showStatus("Network error: " + err.message, "error");

@@ -126,7 +126,7 @@ merchant_data = {
         });
 
         form.on("fail", (event) => {
-          alert("Payment failed: " + event.error?.message);
+          alert("Payment failed: " + (event.data ?? event).message); // payload is under e.data
           console.log("Failed:", event);
         });
 

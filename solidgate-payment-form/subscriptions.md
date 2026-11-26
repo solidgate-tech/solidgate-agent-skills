@@ -1,4 +1,7 @@
-# Subscriptions
+# Subscriptions (Billing v1)
+
+> **This file covers Billing v1 (Subscriptions 1.0)** — top-level `product_id` / `product_price_id`, `customer_account_id`, the `subscriptions.solidgate.com/api/v1` API and the `subscription.updated.v2` webhook.
+> For **Billing v2 (Subscriptions 2.0 / Invoicing)** — `checkout` object, `customer_id`, `invoice_id`, `SUBSCRIPTION_*` / `INVOICE_*` events — use [billing-v2.md](billing-v2.md) instead. Not sure which one the merchant runs? See [billing-v2.md § decide first](billing-v2.md#billing-v1-or-billing-v2-decide-first). Never mix fields from both.
 
 Create and manage recurring billing through the Payment Form. Products and pricing are configured in Solidgate Hub; the Payment Form handles the initial payment and card tokenization.
 
@@ -234,5 +237,5 @@ PayPal, Alipay, GCash, MB WAY, Mercado Pago, UPI, WeChat Pay, Pix
 
 - A subscription can only be updated **once per billing period**
 - Calendar billing (day-of-month alignment) is supported — configure in Hub
-- Coupons and discounts can be applied via Hub or API
+- Coupons and discounts: pass a top-level `coupon_id` in the paymentIntent at init, or let the customer type a code and call `form.applyCoupon(code)` on the frontend (see [frontend-sdk.md](frontend-sdk.md#formapplycouponcouponcode)). Hub and API also work.
 - Tax calculation integrates with the subscription billing
